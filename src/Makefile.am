@@ -17,25 +17,19 @@ AM_CFLAGS =\
 bin_PROGRAMS = gvolwheel
 
 if BACKEND_ALSA
-BACKEND = alsa.c alsa.h
+BACKEND = volume_alsa.c
 else
-BACKEND = oss.c oss.h
+BACKEND = volume_oss.c
 endif
 
 gvolwheel_SOURCES = \
 	main.c \
-	actions.c \
-	actions.h \
-	callbacks.c \
-	callbacks.h \
-	conf.c \
-	conf.h \
+	settings.c \
+	gvolwheel.h \
 	volume.c \
-	volume.h \
-	configwindow.c \
-	configwindow.h \
 	trayicon.c \
-	trayicon.h \
+	settings_window.c \
+	volume_window.c \
         $(BACKEND)
 
 gvolwheel_LDFLAGS = \

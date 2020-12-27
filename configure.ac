@@ -1,7 +1,7 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl Created by Anjuta application wizard.
 
-AC_INIT(gvolwheel, 1.0, http://gvolwheel.sourceforge.net/, , http://gvolwheel.sourceforge.net/)
+AC_INIT(gvolwheel, 1.1.0, https://github.com/Junker/gvolwheel/, , https://github.com/Junker/gvolwheel/)
 
 AC_SUBST(PACKAGE_DATA_DIR)
 

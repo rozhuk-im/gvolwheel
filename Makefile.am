@@ -5,7 +5,7 @@ SUBDIRS = src po
 
 gvolwheeldocdir = ${prefix}/doc/gvolwheel
 gvolwheeldoc_DATA = \
-	README\
+	README.md\
 	COPYING\
 	AUTHORS\
 	ChangeLog\

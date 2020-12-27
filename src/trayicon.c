@@ -1,162 +1,241 @@
-/* -*- Mode: C; indent-tabs-mode: t; c-basic-offset: 4; tab-width: 4 -*- */
-/*
- * trayicon.c
+/*-
  * Copyright (C) Dmitry Kosenkov 2011 <junker@front.ru>
+ * Copyright (c) 2020 Rozhuk Ivan <rozhuk.im@gmail.com>
  *
- * callbacks.c is free software: you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation, either version 3 of the License, or
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  *
- * callbacks.c is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See the GNU General Public License for more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <sys/param.h>
+#include <sys/types.h>
+#include <inttypes.h>
+
 #include <config.h>
+#include "gvolwheel.h"
 
-#include "trayicon.h"
-#include "conf.h"
-#include "actions.h"
-#include "volume.h"
 
-const char *tray_image_stocks[] = {
-	 "audio-volume-muted",
-	 "audio-volume-low",
-	 "audio-volume-medium",
-	 "audio-volume-high"
- 	 };
+static const char *tray_image_stocks[VOLUME_GRAPH_LEVELS] = {
+	"audio-volume-muted",
+	"audio-volume-low",
+	"audio-volume-medium",
+	"audio-volume-high"
+};
 
-GtkStatusIcon *tray_icon;
-GdkPixbuf *tray_pixbufs[4];
 
-GtkStatusIcon *create_tray_icon()
+static void
+on_tray_icon_menu_config_click(GtkMenuItem *menuitem __unused,
+    gpointer user_data)
 {
-	tray_icon = gtk_status_icon_new();
+	config_window_show(user_data);
+}
 
-	if (opt_gnome_icons==TRUE)
-		gtk_status_icon_set_from_icon_name(tray_icon, tray_image_stocks[1]);
-	else load_pixbufs(), gtk_status_icon_set_from_pixbuf(tray_icon, tray_pixbufs[2]);
+static void
+on_tray_icon_menu_about_click(GtkMenuItem *menuitem __unused,
+    gpointer user_data __unused)
+{
+	GtkAboutDialog *dlg = GTK_ABOUT_DIALOG(gtk_about_dialog_new());
+	gtk_about_dialog_set_program_name(dlg, "GVolWheel");
+	gtk_about_dialog_set_version(dlg, VERSION);
+	gtk_about_dialog_set_copyright(dlg,
+	    "Copyright (c) Dmitry Kosenkov 2011\n"
+	    "Copyright (c) 2020 Rozhuk Ivan <rozhuk.im@gmail.com>");
+	gtk_about_dialog_set_website(dlg, PACKAGE_URL);
+	gtk_about_dialog_set_comments(dlg, "Volume mixer");
+	gtk_dialog_run(GTK_DIALOG(dlg));
+	gtk_widget_destroy(GTK_WIDGET(dlg));
+}
 
-	update_tray_image();
+static void
+tray_icon_menu_show(gvw_p gvw)
+{
+	if (!gvw->tray_icon_menu) {
+		GtkWidget *mitem;
+		gvw->tray_icon_menu = GTK_MENU(gtk_menu_new());
 
-	g_signal_connect(G_OBJECT(tray_icon), "button-release-event", G_CALLBACK(on_tray_icon_click), NULL);
-	g_signal_connect(G_OBJECT(tray_icon), "button-press-event", G_CALLBACK(on_tray_icon_press), NULL);
-	g_signal_connect(G_OBJECT(tray_icon), "scroll-event", G_CALLBACK(on_tray_icon_scroll), NULL);
-//?	g_signal_connect(G_OBJECT(tray_icon), "destroy", G_CALLBACK(on_tray_icon_destroyed), NULL);
+		/* Preferences. */
+		mitem = gtk_image_menu_item_new_from_stock("gtk-preferences", NULL);
+		g_signal_connect(G_OBJECT(mitem), "activate",
+		    G_CALLBACK(on_tray_icon_menu_config_click), gvw);
+		gtk_menu_shell_append(GTK_MENU_SHELL(gvw->tray_icon_menu),
+		    mitem);
+		/* About. */
+		mitem = gtk_image_menu_item_new_from_stock("gtk-about", NULL);
+		g_signal_connect(G_OBJECT(mitem), "activate",
+		    G_CALLBACK(on_tray_icon_menu_about_click), gvw);
+		gtk_menu_shell_append(GTK_MENU_SHELL(gvw->tray_icon_menu),
+		    mitem);
+		/* Separator. */
+		gtk_menu_shell_append(GTK_MENU_SHELL(gvw->tray_icon_menu),
+		    gtk_separator_menu_item_new());
+		/* Quit. */
+		mitem  = gtk_image_menu_item_new_from_stock("gtk-quit", NULL);
+		g_signal_connect(G_OBJECT(mitem), "activate",
+		    G_CALLBACK(gtk_main_quit), NULL);
+		gtk_menu_shell_append(GTK_MENU_SHELL(gvw->tray_icon_menu),
+		    mitem);
 
-	gtk_status_icon_set_visible(tray_icon, TRUE);
-
-
-	return tray_icon;
+		gtk_widget_show_all(GTK_WIDGET(gvw->tray_icon_menu));
+	}
+	gtk_menu_popup_at_pointer(gvw->tray_icon_menu, NULL);
 }
 
 
-void load_pixbufs()
+static void
+on_tray_icon_scroll(GtkWidget *widget __unused, GdkEventScroll *event,
+    gpointer user_data)
 {
-	GtkImage *tmp_image;
-	gchar *tmp;
-	int i;
+	switch (event->direction) {
+	case GDK_SCROLL_UP:
+		vol_up(user_data);
+		break;
+	case GDK_SCROLL_DOWN:
+		vol_down(user_data);
+		break;
+	}
+}
 
-	gchar *pixmap_path = g_build_filename(PACKAGE_DATA_DIR, "pixmaps", PACKAGE_NAME,NULL);
+static void
+on_tray_icon_click(GtkWidget *widget __unused, GdkEventButton *event,
+    gpointer user_data)
+{
+	switch (event->button) {
+	case 2:
+		vol_mute_toggle(user_data);
+		break;
+	case 3:
+		tray_icon_menu_show(user_data);
+		break;
+	}
+}
 
-	for (i = 0; i < 4; i++)
-	{
-		tmp = g_build_filename(g_get_home_dir(),
-		                       ".config",
-		                       PACKAGE_NAME,
-		                       "pixmaps",
-		                       tray_image_stocks[i],
-		                       NULL
-		                      );
-		gchar *image_filename_local = g_strconcat(tmp, ".png", NULL);
-		g_free(tmp);
+static void
+on_tray_icon_press(GtkWidget *widget __unused, GdkEventButton *event,
+    gpointer user_data)
+{
+	if (event->button != 1)
+		return;
+	switch (event->type) {
+	case GDK_BUTTON_PRESS:
+		vol_window_toggle(user_data);
+		break;
+	case GDK_2BUTTON_PRESS:
+		launch_mixer(user_data);
+		break;
+	}
+}
 
-		tmp = g_build_filename(pixmap_path,
-		                       tray_image_stocks[i],
-		                       NULL);
-		gchar *image_filename = g_strconcat(tmp, ".png", NULL);
-		g_free(tmp);
+void
+tray_icon_init(gvw_p gvw)
+{
+	gvw->tray_icon = gtk_status_icon_new();
 
-		if (g_file_test(image_filename_local, G_FILE_TEST_EXISTS))
-			tmp_image = GTK_IMAGE(gtk_image_new_from_file(image_filename_local));
-		else
-			tmp_image = GTK_IMAGE(gtk_image_new_from_file(image_filename));
+	if (gvw->s.gnome_icons) {
+		gtk_status_icon_set_from_icon_name(gvw->tray_icon,
+		    tray_image_stocks[1]);
+	} else {
+		tray_icon_reload_pixbufs(gvw);
+		gtk_status_icon_set_from_pixbuf(gvw->tray_icon,
+		    gvw->tray_pixbufs[2]);
+	}
+
+	g_signal_connect(G_OBJECT(gvw->tray_icon), "button-release-event",
+	    G_CALLBACK(on_tray_icon_click), gvw);
+	g_signal_connect(G_OBJECT(gvw->tray_icon), "button-press-event",
+	    G_CALLBACK(on_tray_icon_press), gvw);
+	g_signal_connect(G_OBJECT(gvw->tray_icon), "scroll-event",
+	    G_CALLBACK(on_tray_icon_scroll), gvw);
+
+	tray_icon_update(gvw);
+
+	gtk_status_icon_set_visible(gvw->tray_icon, TRUE);
+}
 
 
-		tray_pixbufs[i] = gtk_image_get_pixbuf (tmp_image);
+void
+tray_icon_reload_pixbufs(gvw_p gvw)
+{
+	gchar *pixmap_path, img_filename[1024];
 
-		g_free(image_filename_local);
-		g_free(image_filename);
+	pixmap_path = g_build_filename(PACKAGE_DATA_DIR, "pixmaps",
+	    PACKAGE_NAME, NULL);
+	for (size_t i = 0; i < VOLUME_GRAPH_LEVELS; i ++) {
+		/* Try to load from profile dir. */
+		g_snprintf(img_filename, sizeof(img_filename), "%s/%s/%s/%s/%s.png",
+		    g_get_home_dir(), ".config", PACKAGE_NAME, "pixmaps",
+		    tray_image_stocks[i]);
+		/* If not exist - load from package defauilt. */
+		if (!g_file_test(img_filename, G_FILE_TEST_EXISTS)) {
+			snprintf(img_filename, sizeof(img_filename),
+			    "%s/%s.png",
+			    pixmap_path, tray_image_stocks[i]);
+		}
+		/* XXX: need some free res here? */
+		gvw->tray_imgs[i] = GTK_IMAGE(gtk_image_new_from_file(img_filename));
+		gvw->tray_pixbufs[i] = gtk_image_get_pixbuf(gvw->tray_imgs[i]);
 	}
 	g_free(pixmap_path);
-
 }
 
-gboolean tray_icon_recreate(gpointer data)
+
+gboolean
+tray_icon_update(gvw_p gvw)
 {
-	tray_icon = create_tray_icon();
-	return FALSE;
-}
+	size_t i;
+	uint32_t cur_vol = vol_get(gvw);
+	const uint32_t vol_lvls[VOLUME_GRAPH_LEVELS] = { 0, 33, 66, 100 };
+	GdkPixbuf *cur_icon_pixbuf = NULL;
+	const char *cur_icon_name = "";
+	char volchar[16];
 
-void on_tray_icon_destroyed(GtkWidget *widget, void *data)
-{
-	g_object_unref(G_OBJECT(tray_icon));
-	tray_icon = NULL;
-
-	g_idle_add(tray_icon_recreate, NULL);
-}
-
-void on_tray_icon_scroll (GtkWidget *widget, GdkEventScroll *event, gpointer user_data)
-{
-	if (event->direction == GDK_SCROLL_UP) vol_up();
-    if (event->direction == GDK_SCROLL_DOWN) vol_down();
-	update_tray_image();
-}
-
-void on_tray_icon_click(GtkWidget *widget, GdkEventButton *event, gpointer user_data)
-{
-	if (event->button == 3) tray_icon_menu_show();
-	if (event->button == 2)
-	{
-		vol_mute();
-		update_tray_image();
-	}
-}
-
-void on_tray_icon_press(GtkWidget *widget, GdkEventButton *event, gpointer user_data)
-{
-	if (event->button == 1 && event->type == GDK_BUTTON_PRESS) vol_window_show();
-	if (event->button == 1 && event->type == GDK_2BUTTON_PRESS) launch_mixer();
-}
-
-void update_tray_image()
-{
-	gint vol = vol_get();
-	gchar volchar[5];
-	GdkPixbuf *tmp_pixbuf;
-
-	if (!opt_gnome_icons)
-	{
-		if (gtk_status_icon_get_storage_type(tray_icon) == GTK_IMAGE_PIXBUF) tmp_pixbuf = gtk_status_icon_get_pixbuf(tray_icon);
-		if (vol>0  && vol<=33  && tmp_pixbuf!=tray_pixbufs[1]) gtk_status_icon_set_from_pixbuf(tray_icon, tray_pixbufs[1]);
-    	if (vol>33 && vol<=66  && tmp_pixbuf!=tray_pixbufs[2]) gtk_status_icon_set_from_pixbuf(tray_icon, tray_pixbufs[2]);
-    	if (vol>66 && vol<=100 && tmp_pixbuf!=tray_pixbufs[3]) gtk_status_icon_set_from_pixbuf(tray_icon, tray_pixbufs[3]);
-    	if (vol==0 &&             tmp_pixbuf!=tray_pixbufs[0]) gtk_status_icon_set_from_pixbuf(tray_icon, tray_pixbufs[0]);
-	}
-	else {
-		const gchar *icon_name = "";
-		if (gtk_status_icon_get_storage_type(tray_icon) == GTK_IMAGE_STOCK) icon_name = gtk_status_icon_get_icon_name(tray_icon);
-		if (vol>0  && vol<=33  && strcmp(icon_name, tray_image_stocks[1]) != 0) gtk_status_icon_set_from_icon_name(tray_icon, tray_image_stocks[1]);
-    	if (vol>33 && vol<=66  && strcmp(icon_name, tray_image_stocks[2]) != 0) gtk_status_icon_set_from_icon_name(tray_icon, tray_image_stocks[2]);
-   		if (vol>66 && vol<=100 && strcmp(icon_name, tray_image_stocks[3]) != 0) gtk_status_icon_set_from_icon_name(tray_icon, tray_image_stocks[3]);
-    	if (vol==0 &&             strcmp(icon_name, tray_image_stocks[0]) != 0) gtk_status_icon_set_from_icon_name(tray_icon, tray_image_stocks[0]);
+	/* Get current icon. */
+	switch (gtk_status_icon_get_storage_type(gvw->tray_icon)) {
+	case GTK_IMAGE_PIXBUF:
+		cur_icon_pixbuf = gtk_status_icon_get_pixbuf(gvw->tray_icon);
+		break;
+	case GTK_IMAGE_STOCK:
+		cur_icon_name = gtk_status_icon_get_icon_name(gvw->tray_icon);
+		break;
 	}
 
-	g_sprintf(volchar, "%i\%%", vol);
-	if (opt_show_tooltip) gtk_status_icon_set_tooltip_text(tray_icon, volchar);
+	/* Use gnome if enabled or if no pixbufs loaded. */
+	if (gvw->s.gnome_icons || gvw->tray_pixbufs[0] == NULL) {
+		for (i = 0; i < VOLUME_GRAPH_LEVELS; i ++) {
+			if (vol_lvls[i] < cur_vol)
+				continue;
+			if (strcmp(cur_icon_name, tray_image_stocks[i]) == 0)
+				break; /* No need to update. */
+			gtk_status_icon_set_from_icon_name(gvw->tray_icon,
+			    tray_image_stocks[i]);
+			break;
+		}
+	} else {
+		for (i = 0; i < VOLUME_GRAPH_LEVELS; i ++) {
+			if (vol_lvls[i] < cur_vol)
+				continue;
+			if (cur_icon_pixbuf == gvw->tray_pixbufs[i])
+				break; /* No need to update. */
+			gtk_status_icon_set_from_pixbuf(gvw->tray_icon,
+			    gvw->tray_pixbufs[i]);
+			break;
+		}
+	}
+
+	if (!gvw->s.show_tooltip) {
+		gtk_status_icon_set_tooltip_text(gvw->tray_icon, "");
+	} else {
+		snprintf(volchar, sizeof(volchar), "%i%%", cur_vol);
+		gtk_status_icon_set_tooltip_text(gvw->tray_icon, volchar);
+	}
+
+	return (TRUE);
 }
